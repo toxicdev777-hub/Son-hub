@@ -1,0 +1,730 @@
+-- ==================== SOON HUB ====================
+-- UI: WindUI
+
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+
+local lp = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+local Window = WindUI:CreateWindow({
+    Title = "Soon Hub",
+    Icon = "zap",
+    Theme = "Dark",
+    Folder = "SoonHub",
+})
+
+local MainTab     = Window:Tab({ Title = "Main", Icon = "home" })
+local ESPTab      = Window:Tab({ Title = "ESP", Icon = "eye" })
+local GlitchTab   = Window:Tab({ Title = "Glitch", Icon = "sparkles" })
+local MiscTab     = Window:Tab({ Title = "Misc", Icon = "settings" })
+local TeleportTab = Window:Tab({ Title = "Teleport", Icon = "map-pin" })
+
+-- ==================== STATES ====================
+local SelectedPlayer = nil
+local TPEnabled = false
+local TPBypassEnabled = false
+local Viewing = false
+local OldCameraSubject = nil
+
+local FastAttack = false
+local SpeedEnabled = false
+local SpeedValue = 80
+local Jump5x = false
+local DefaultJump = 50
+local AutoV4 = false
+local AutoV3 = false
+
+local NoClip = false
+local FOVEnabled = false
+local DefaultFOV = 70
+
+local ESP = {
+    Enabled = false,
+    Box = true,
+    Health = true,
+    Line = true,
+    Name = true,
+    drawings = {}
+}
+
+local BringV1 = false
+local BringAll = false
+local Size10x = false
+local SpinEnabled = false
+local SpinSpeed = 50
+local SpinAngle = 0
+
+-- ==================== HELPERS ====================
+local function cleanCharacterPhysics()
+    local char = lp.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hum then
+        hum.PlatformStand = false
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+    end
+    if hrp then
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 2, 0)
+        task.defer(function()
+            if hrp and hrp.Parent then
+                hrp.AssemblyLinearVelocity = Vector3.zero
+            end
+        end)
+    end
+end
+
+local function setNoclip(char, enabled)
+    if not char then return end
+    for _, part in pairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+        end
+    end
+end
+
+local function requestEntrance(pos)
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local comm = remotes and remotes:FindFirstChild("CommF_")
+    if comm then
+        pcall(function()
+            comm:InvokeServer("requestEntrance", pos)
+        end)
+    end
+end
+
+local function tpToCFrame(cf)
+    local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        hrp.CFrame = cf
+    end
+end
+
+-- ==================== PLAYER LIST ====================
+local function getPlayerNames()
+    local list = {"None"}
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= lp then
+            table.insert(list, plr.Name)
+        end
+    end
+    return list
+end
+
+local PlayerDropdown = MainTab:Dropdown({
+    Title = "Player List",
+    Values = getPlayerNames(),
+    Value = "None",
+    Callback = function(value)
+        SelectedPlayer = (value ~= "None") and Players:FindFirstChild(value) or nil
+    end
+})
+
+local function refreshPlayerList()
+    pcall(function() PlayerDropdown:Refresh(getPlayerNames()) end)
+end
+
+Players.PlayerAdded:Connect(function()
+    task.wait(0.3)
+    refreshPlayerList()
+end)
+Players.PlayerRemoving:Connect(function(plr)
+    if SelectedPlayer == plr then SelectedPlayer = nil end
+    task.wait(0.3)
+    refreshPlayerList()
+end)
+task.spawn(function()
+    while true do
+        refreshPlayerList()
+        task.wait(5)
+    end
+end)
+
+-- ==================== TELEPORT PLAYER / BYPASS ====================
+RunService.Heartbeat:Connect(function()
+    if TPEnabled and SelectedPlayer then
+        local targetRoot = SelectedPlayer.Character and SelectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local myChar = lp.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+        if targetRoot and myRoot and myHum then
+            setNoclip(myChar, true)
+            myHum.PlatformStand = true
+            local goal = targetRoot.CFrame * CFrame.new(0, 2, 4)
+            local dist = (goal.Position - myRoot.Position).Magnitude
+            if dist > 6 then
+                local dir = (goal.Position - myRoot.Position).Unit
+                myRoot.CFrame = CFrame.new(myRoot.Position + dir * math.min(dist, 12), goal.Position)
+            else
+                myRoot.CFrame = goal
+            end
+            myRoot.AssemblyLinearVelocity = Vector3.zero
+            myRoot.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+
+    if TPBypassEnabled and SelectedPlayer then
+        local targetRoot = SelectedPlayer.Character and SelectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+        if targetRoot and myRoot then
+            setNoclip(lp.Character, true)
+            myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 2, 3)
+            myRoot.AssemblyLinearVelocity = Vector3.zero
+        end
+    end
+end)
+
+MainTab:Toggle({
+    Title = "Teleport Player",
+    Value = false,
+    Callback = function(state)
+        if state then
+            if not SelectedPlayer then
+                WindUI:Notify({ Title = "Soon Hub", Content = "Select a player first", Duration = 3 })
+                return
+            end
+            TPEnabled = true
+        else
+            TPEnabled = false
+            setNoclip(lp.Character, false)
+            cleanCharacterPhysics()
+        end
+    end
+})
+
+MainTab:Toggle({
+    Title = "Teleport Bypass",
+    Value = false,
+    Callback = function(state)
+        if state then
+            if not SelectedPlayer then
+                WindUI:Notify({ Title = "Soon Hub", Content = "Select a player first", Duration = 3 })
+                return
+            end
+            TPBypassEnabled = true
+        else
+            TPBypassEnabled = false
+            setNoclip(lp.Character, false)
+            cleanCharacterPhysics()
+        end
+    end
+})
+
+MainTab:Toggle({
+    Title = "View Player Screen",
+    Value = false,
+    Callback = function(state)
+        if state then
+            if not SelectedPlayer or not SelectedPlayer.Character then
+                WindUI:Notify({ Title = "Soon Hub", Content = "Select a valid player", Duration = 3 })
+                return
+            end
+            local hum = SelectedPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                OldCameraSubject = camera.CameraSubject
+                camera.CameraSubject = hum
+                Viewing = true
+            end
+        else
+            Viewing = false
+            if OldCameraSubject then
+                camera.CameraSubject = OldCameraSubject
+            elseif lp.Character then
+                local hum = lp.Character:FindFirstChildOfClass("Humanoid")
+                if hum then camera.CameraSubject = hum end
+            end
+        end
+    end
+})
+
+MainTab:Divider()
+MainTab:Section({ Title = "Auto Race" })
+
+MainTab:Toggle({
+    Title = "Auto V4",
+    Value = false,
+    Callback = function(state) AutoV4 = state end
+})
+MainTab:Toggle({
+    Title = "Auto V3",
+    Value = false,
+    Callback = function(state) AutoV3 = state end
+})
+
+task.spawn(function()
+    while true do
+        if AutoV4 then
+            pcall(function()
+                local bp = lp:FindFirstChild("Backpack")
+                local awakening = bp and bp:FindFirstChild("Awakening")
+                if awakening and awakening:FindFirstChild("RemoteFunction") then
+                    awakening.RemoteFunction:InvokeServer(true)
+                end
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                if remotes and remotes:FindFirstChild("CommF_") then
+                    pcall(function() remotes.CommF_:InvokeServer("ActivateV4") end)
+                end
+            end)
+        end
+        if AutoV3 then
+            pcall(function()
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                if remotes and remotes:FindFirstChild("CommE") then
+                    remotes.CommE:FireServer("ActivateAbility")
+                end
+            end)
+        end
+        task.wait(0.7)
+    end
+end)
+
+MainTab:Divider()
+MainTab:Section({ Title = "Fast Attack" })
+
+local function getClosestAny(range)
+    local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local closest, best = nil, range or 160
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= lp and plr.Character then
+            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+            local root = plr.Character:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health > 0 and root then
+                local d = (root.Position - myRoot.Position).Magnitude
+                if d < best then best = d closest = {Root = root, Model = plr.Character} end
+            end
+        end
+    end
+
+    local enemies = Workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, npc in pairs(enemies:GetChildren()) do
+            if npc:IsA("Model") then
+                local hum = npc:FindFirstChildOfClass("Humanoid")
+                local root = npc:FindFirstChild("HumanoidRootPart")
+                if hum and hum.Health > 0 and root then
+                    local d = (root.Position - myRoot.Position).Magnitude
+                    if d < best then best = d closest = {Root = root, Model = npc} end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+task.spawn(function()
+    while true do
+        if FastAttack then
+            local char = lp.Character
+            local tool = char and char:FindFirstChildOfClass("Tool")
+            if tool then
+                local Modules = ReplicatedStorage:FindFirstChild("Modules")
+                local Net = Modules and Modules:FindFirstChild("Net")
+                local RegisterAttack = Net and Net:FindFirstChild("RE/RegisterAttack")
+                local RegisterHit = Net and Net:FindFirstChild("RE/RegisterHit")
+                local targetData = getClosestAny(160)
+                if RegisterAttack and RegisterHit and targetData then
+                    local model = targetData.Model
+                    local root = targetData.Root
+                    local head = model:FindFirstChild("Head") or root
+                    pcall(function()
+                        RegisterAttack:FireServer(0.01)
+                        local hits = {}
+                        for _, part in pairs(model:GetDescendants()) do
+                            if part:IsA("BasePart") then
+                                table.insert(hits, {model, part})
+                            end
+                        end
+                        if #hits == 0 then table.insert(hits, {model, root}) end
+                        RegisterHit:FireServer(head, hits)
+                    end)
+                end
+            end
+            task.wait(0.02)
+        else
+            task.wait(0.1)
+        end
+    end
+end)
+
+MainTab:Toggle({
+    Title = "Fast Attack",
+    Value = false,
+    Callback = function(state) FastAttack = state end
+})
+
+MainTab:Divider()
+MainTab:Section({ Title = "Speed" })
+
+local speedConn
+MainTab:Toggle({
+    Title = "Speed",
+    Value = false,
+    Callback = function(state)
+        SpeedEnabled = state
+        if speedConn then speedConn:Disconnect() speedConn = nil end
+        if state then
+            speedConn = RunService.Heartbeat:Connect(function()
+                if not SpeedEnabled then return end
+                local char = lp.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 then
+                    char:TranslateBy(hum.MoveDirection * (SpeedValue / 30))
+                end
+            end)
+        end
+    end
+})
+
+MainTab:Toggle({
+    Title = "Jump 5x",
+    Value = false,
+    Callback = function(state)
+        Jump5x = state
+        local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        if state then
+            if hum.UseJumpPower then
+                DefaultJump = hum.JumpPower
+                hum.JumpPower = DefaultJump * 5
+            else
+                DefaultJump = hum.JumpHeight
+                hum.JumpHeight = DefaultJump * 5
+            end
+        else
+            if hum.UseJumpPower then hum.JumpPower = DefaultJump
+            else hum.JumpHeight = DefaultJump end
+        end
+    end
+})
+
+lp.CharacterAdded:Connect(function()
+    task.wait(0.6)
+    if Jump5x then
+        local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if hum.UseJumpPower then hum.JumpPower = DefaultJump * 5
+            else hum.JumpHeight = DefaultJump * 5 end
+        end
+    end
+    if FOVEnabled then camera.FieldOfView = 150 end
+    if Size10x then pcall(function() lp.Character:ScaleTo(10) end) end
+end)
+
+-- ==================== ESP CURSED (all players, even behind you) ====================
+local function clearESP()
+    for _, d in pairs(ESP.drawings) do
+        pcall(function() d:Remove() end)
+    end
+    ESP.drawings = {}
+end
+
+local function worldToScreen(worldPos)
+    local pos, _ = camera:WorldToViewportPoint(worldPos)
+    -- keep line working when target is behind camera
+    if pos.Z < 0 then
+        local inv = camera.CFrame:PointToObjectSpace(worldPos)
+        local rel = Vector3.new(-inv.X, inv.Y, inv.Z)
+        local fov = math.rad(camera.FieldOfView)
+        local aspect = camera.ViewportSize.X / camera.ViewportSize.Y
+        local sy = math.tan(fov * 0.5)
+        local sx = sy * aspect
+        local ndcX = rel.X / (rel.Z * sx)
+        local ndcY = rel.Y / (rel.Z * sy)
+        local vx = (0.5 + 0.5 * ndcX) * camera.ViewportSize.X
+        local vy = (0.5 - 0.5 * ndcY) * camera.ViewportSize.Y
+        return Vector2.new(vx, vy), false
+    end
+    return Vector2.new(pos.X, pos.Y), pos.Z > 0
+end
+
+local function updateESP()
+    clearESP()
+    if not ESP.Enabled then return end
+
+    local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    local myScreen = worldToScreen(myRoot.Position)
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= lp and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+            local root = plr.Character.HumanoidRootPart
+            if hum and hum.Health > 0 then
+                local screenPos, inFront = worldToScreen(root.Position)
+                local pos, onScreen = camera:WorldToViewportPoint(root.Position)
+
+                if onScreen then
+                    if ESP.Box then
+                        local size = Vector2.new(
+                            math.clamp(1800 / math.max((camera.CFrame.Position - root.Position).Magnitude, 1), 8, 120),
+                            math.clamp(3600 / math.max((camera.CFrame.Position - root.Position).Magnitude, 1), 16, 240)
+                        )
+                        local function boxLine(a, b)
+                            local l = Drawing.new("Line")
+                            l.From = a
+                            l.To = b
+                            l.Color = Color3.fromRGB(255, 50, 50)
+                            l.Thickness = 1.4
+                            l.Visible = true
+                            table.insert(ESP.drawings, l)
+                        end
+                        local tl = Vector2.new(pos.X - size.X/2, pos.Y - size.Y/2)
+                        local tr = Vector2.new(pos.X + size.X/2, pos.Y - size.Y/2)
+                        local bl = Vector2.new(pos.X - size.X/2, pos.Y + size.Y/2)
+                        local br = Vector2.new(pos.X + size.X/2, pos.Y + size.Y/2)
+                        boxLine(tl, tr) boxLine(tr, br) boxLine(br, bl) boxLine(bl, tl)
+                    end
+
+                    if ESP.Health then
+                        local hp = math.floor((hum.Health / hum.MaxHealth) * 100)
+                        local color = Color3.fromRGB(0, 255, 0)
+                        if hp <= 50 then color = Color3.fromRGB(255, 255, 0) end
+                        if hp <= 20 then color = Color3.fromRGB(255, 0, 0) end
+                        local t = Drawing.new("Text")
+                        t.Text = hp .. "%"
+                        t.Size = 13
+                        t.Center = true
+                        t.Outline = true
+                        t.Color = color
+                        t.Position = Vector2.new(pos.X, pos.Y + 28)
+                        t.Visible = true
+                        table.insert(ESP.drawings, t)
+                    end
+
+                    if ESP.Name then
+                        local t = Drawing.new("Text")
+                        t.Text = string.format("%s\n@%s", plr.DisplayName or plr.Name, plr.Name)
+                        t.Size = 13
+                        t.Center = true
+                        t.Outline = true
+                        t.Color = Color3.fromRGB(255, 255, 255)
+                        t.Position = Vector2.new(pos.X, pos.Y - 42)
+                        t.Visible = true
+                        table.insert(ESP.drawings, t)
+                    end
+                end
+
+                -- Cursed line to EVERY player (looking or not)
+                if ESP.Line and myScreen and screenPos then
+                    local l = Drawing.new("Line")
+                    l.From = myScreen
+                    l.To = screenPos
+                    l.Color = Color3.fromRGB(120, 0, 0)
+                    l.Thickness = 1.7
+                    l.Visible = true
+                    table.insert(ESP.drawings, l)
+                end
+            end
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if ESP.Enabled then updateESP() else clearESP() end
+end)
+
+ESPTab:Toggle({
+    Title = "Enable ESP",
+    Value = false,
+    Callback = function(state) ESP.Enabled = state end
+})
+ESPTab:Toggle({
+    Title = "ESP Box",
+    Value = true,
+    Callback = function(state) ESP.Box = state end
+})
+ESPTab:Toggle({
+    Title = "ESP Health %",
+    Value = true,
+    Callback = function(state) ESP.Health = state end
+})
+ESPTab:Toggle({
+    Title = "ESP Name (@ + Display)",
+    Value = true,
+    Callback = function(state) ESP.Name = state end
+})
+ESPTab:Toggle({
+    Title = "ESP Line Cursed (All)",
+    Value = true,
+    Callback = function(state) ESP.Line = state end
+})
+
+-- ==================== GLITCH ====================
+RunService.Heartbeat:Connect(function()
+    if BringV1 or BringAll then
+        local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+        local enemies = Workspace:FindFirstChild("Enemies")
+        if not enemies then return end
+        local range = BringAll and 500 or 120
+        for _, npc in pairs(enemies:GetChildren()) do
+            local hum = npc:FindFirstChildOfClass("Humanoid")
+            local root = npc:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health > 0 and root then
+                if (root.Position - myRoot.Position).Magnitude <= range then
+                    pcall(function()
+                        root.CFrame = myRoot.CFrame * CFrame.new(0, -5, 0)
+                        root.AssemblyLinearVelocity = Vector3.zero
+                    end)
+                end
+            end
+        end
+    end
+end)
+
+GlitchTab:Toggle({
+    Title = "Bring Mode V1 (120)",
+    Value = false,
+    Callback = function(state) BringV1 = state end
+})
+GlitchTab:Toggle({
+    Title = "Bring Mode (All)",
+    Value = false,
+    Callback = function(state) BringAll = state end
+})
+GlitchTab:Toggle({
+    Title = "10x Size",
+    Value = false,
+    Callback = function(state)
+        Size10x = state
+        local char = lp.Character
+        if char then pcall(function() char:ScaleTo(state and 10 or 1) end) end
+    end
+})
+
+-- Spin (stable with walk + shift lock)
+GlitchTab:Toggle({
+    Title = "Spin",
+    Value = false,
+    Callback = function(state)
+        SpinEnabled = state
+        SpinAngle = 0
+        local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.AutoRotate = not state
+        end
+    end
+})
+
+GlitchTab:Input({
+    Title = "Spin Speed",
+    Value = "50",
+    Placeholder = "Spin speed (no max)",
+    Callback = function(text)
+        local n = tonumber(text)
+        if n then
+            SpinSpeed = n
+        end
+    end
+})
+
+RunService.RenderStepped:Connect(function(dt)
+    if not SpinEnabled then return end
+    local char = lp.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp then return end
+    if hum then hum.AutoRotate = false end
+
+    -- only spin on Y, keep position & movement
+    SpinAngle = SpinAngle + math.rad(SpinSpeed * dt * 10)
+    local pos = hrp.Position
+    local vel = hrp.AssemblyLinearVelocity
+    hrp.CFrame = CFrame.new(pos) * CFrame.Angles(0, SpinAngle, 0)
+    hrp.AssemblyLinearVelocity = vel -- keep walk velocity
+    hrp.AssemblyAngularVelocity = Vector3.zero
+end)
+
+-- Fly = only execute the script you sent
+GlitchTab:Button({
+    Title = "Fly",
+    Icon = "wind",
+    Callback = function()
+        WindUI:Notify({ Title = "Fly", Content = "Loading fly script...", Duration = 2 })
+        pcall(function()
+            loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-ifly-79329"))()
+        end)
+    end
+})
+
+-- ==================== MISC ====================
+RunService.Stepped:Connect(function()
+    if NoClip and lp.Character then
+        for _, p in pairs(lp.Character:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+            end
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if FOVEnabled and camera.FieldOfView ~= 150 then
+        camera.FieldOfView = 150
+    end
+end)
+
+MiscTab:Toggle({
+    Title = "No Clip",
+    Value = false,
+    Callback = function(state) NoClip = state end
+})
+
+MiscTab:Toggle({
+    Title = "FOV 150",
+    Value = false,
+    Callback = function(state)
+        FOVEnabled = state
+        if not state then
+            camera.FieldOfView = DefaultFOV
+        else
+            camera.FieldOfView = 150
+        end
+    end
+})
+
+-- ==================== TELEPORT (Sea 2 doors / locations) ====================
+TeleportTab:Section({ Title = "Sea 2" })
+
+TeleportTab:Button({
+    Title = "Teleport Haunted Ship",
+    Icon = "ship",
+    Callback = function()
+        -- Sea 2 Haunted Ship / Castle entrance style TP
+        local pos = Vector3.new(-9515.19, 142.13, 5749.20)
+        requestEntrance(pos)
+        task.wait(0.15)
+        tpToCFrame(CFrame.new(-9515.19, 142.13, 5749.20))
+        WindUI:Notify({ Title = "Teleport", Content = "Haunted Ship", Duration = 2 })
+    end
+})
+
+TeleportTab:Button({
+    Title = "Teleport Mansion",
+    Icon = "home",
+    Callback = function()
+        -- Sea 2 Mansion
+        local pos = Vector3.new(2286.93, 15.06, 910.51)
+        requestEntrance(pos)
+        task.wait(0.15)
+        tpToCFrame(CFrame.new(2286.93, 15.06, 910.51))
+        WindUI:Notify({ Title = "Teleport", Content = "Mansion", Duration = 2 })
+    end
+})
+
+WindUI:Notify({
+    Title = "Soon Hub",
+    Content = "Loaded successfully!",
+    Duration = 4,
+})
+
+print("Soon Hub loaded!")
